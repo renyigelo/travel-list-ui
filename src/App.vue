@@ -1,26 +1,35 @@
 <template>
     <div id="app">
         <!--<img src="./assets/logo.png">-->
-        <h1>{{ msg }}</h1>
-        <h1>{{ checkListOptions }}</h1>
-        <h1>{{ checkListValue }}</h1>
-        <h1>{{ menus }}</h1>
+        <!--<h1>{{ msg }}</h1>-->
+        <!--<h1>{{ checkListOptions }}</h1>-->
+        <!--<h1>{{ checkListValue }}</h1>-->
+        <!--<h1>{{ menus }}</h1>-->
         <!--<mt-button v-bind:ab="test" @click.native="startHacking"-->
                    <!--v-bind:class="{ 'active': isActive, 'text-danger': hasError }">{{ msg }}-->
         <!--</mt-button>-->
+
         <div class="sidebar">
             <mt-cell v-bind:title="menu.title"
                      @click.native="startChange"
                      is-link v-for="(menu,index) in menus" v-bind:index="index">
                 <mt-badge size="small">{{menu.size}}</mt-badge>
             </mt-cell>
+            <mt-button plain size="small" type="primary" @click.native="addList">add list</mt-button>
+            <br>
+            <mt-button plain size="small" type="danger" @click.native="reset">reset all</mt-button>
         </div>
         <div class="main">
             <mt-loadmore :top-method="loadTop" @top-status-change="handleTopChange" ref="loadmore">
                 <mt-checklist
                         v-model="checkListValue"
-                        :options="checkListOptions">
+                        :options="checkListOptions"
+                        v-bind:class="{'edited' : isEdited}">
                 </mt-checklist>
+                <div class="buttons">
+                    <mt-button plain size="small" v-if="!isEdited" type="primary" @click.native="addItem">add item</mt-button>
+                    <mt-button plain size="small" type="danger" @click.native="editItem">{{ editButtonText}}</mt-button>
+                </div>
                 <div slot="top" class="mint-loadmore-top">
                     <span v-show="topStatus !== 'loading'" :class="{ 'is-rotate': topStatus === 'drop' }">↓</span>
                     <span v-show="topStatus === 'loading'">
@@ -33,31 +42,30 @@
 </template>
 
 <script>
-
+import { MessageBox } from 'mint-ui';
 export default {
     name: 'app',
     data () {
         return {
+            user: '',
+            url: 'http://52.78.149.10:8084',
+//            url: 'http://127.0.0.1:8084',
             msg: 2,
             topStatus: '',
             checkListValue:[],
             isActive: true,
-            hasError: true,
-            test: 'abc',
+            isEdited: false,          //用于判断是否在 删除模式下
+            editButtonText: 'remove',
             checkListOptions:[
-                {
-                    label:"t"
-                },
-                {
-                    label:"d",
-                    disable:false
-                }
             ],
-            menus:[
-                { title:'t1', size:5},
-                { title:'t2', size:6}
-            ],
+            menus:[],
             index: 0
+        }
+    },
+    watch:{
+        checkListValue:function () {
+            var vm = this;
+            vm.menus[vm.index].size = vm.menus[vm.index].contents.length - vm.checkListValue.length;
         }
     },
     methods: {
@@ -65,26 +73,71 @@ export default {
             var vm = this;
             vm.menus[vm.index].finishValue = vm.checkListValue;
             vm.index = event.target.parentNode.getAttribute("index");
-            vm.msg = vm.index;
             vm.checkListOptions = vm.menus[vm.index].contents;
             vm.checkListValue = vm.menus[vm.index].finishValue;
         },
         handleTopChange(status) {
             this.topStatus = status;
-//            this.$toast('handleTopChange!')
         },
+        addItem(){
+            MessageBox.prompt(' ', 'enter your item').then(({ value }) => {
+                if (value) {
+                    var vm = this;
+                    var item = {'label' : value, 'value' : value};
+                    vm.checkListOptions.push(item);
+                    vm.menus[vm.index].size += 1;
+                    vm.menus[vm.index].contents = vm.checkListOptions;
 
+                }
+            });
+        },
+        editItem(){
+            var vm = this;
+            if(vm.isEdited){
+                vm.isEdited = false;
+                vm.editButtonText = 'remove';
+            }else{
+                vm.isEdited = true;
+                vm.editButtonText = 'submit';
+            }
+
+        },
+        addList(){
+            MessageBox.prompt(' ', 'enter your list').then(({ value }) => {
+                if (value) {
+                    var vm = this;
+                    var list = {'title' : value, 'size' : 0, 'user' : vm.user, 'contents' : []};
+                    vm.menus.push(list);
+                    vm.checkListOptions = [];
+                    vm.checkListValue = [];
+                    vm.index = vm.menus.length - 1;
+                }
+            });
+        },
+        reset(){
+            var vm = this;
+            MessageBox.confirm('确定要重置清单开始一段新旅程吗？').then(action => {
+                vm.axios.put(vm.url + '/list/' + vm.user)
+                    .then(function (response) {
+                        vm.menus = response.data;
+                        vm.checkListValue = vm.menus[0].finishValue;
+                        vm.checkListOptions = vm.menus[0].contents;
+                    })
+                    .catch(function (error) {
+                        console.log('error' + error);
+                    })
+            });
+        },
         loadTop() {
             var vm = this;
-            vm.$toast('loadTop!')
-
+//            vm.$toast('loadTop!')
 //            setTimeout(() => {
 ////            this.$refs.loadmore.onTopLoaded();
 //        }, 1500);
 
 //            this.$refs.loadmore.onTopLoaded();
             vm.menus[vm.index].finishValue = vm.checkListValue;
-            vm.axios.post('http://192.168.123.62:8084/list',vm.menus)
+            vm.axios.post(vm.url + '/list/' + vm.user, vm.menus)
                 .then(function (response) {
                     if(response.data == '0'){
                         vm.$toast('提交成功')
@@ -100,16 +153,18 @@ export default {
         }
     },
     created (){
-        var vm = this
-        vm.axios.get('http://192.168.123.62:8084/list')
+        var vm = this;
+        var currentUrl = window.location.href;
+        var rulePatt = new RegExp("http://.*/");
+        var frontUrl = currentUrl.match(rulePatt);
+        vm.user = currentUrl.substring(frontUrl[0].length);
+        vm.axios.get(vm.url + '/list/' + vm.user)
             .then(function (response) {
                 vm.menus = response.data
                 vm.checkListValue = vm.menus[0].finishValue
-//                vm.msg = vm.checkListValue
                 vm.checkListOptions = vm.menus[0].contents
             })
             .catch(function (error) {
-//                vm.msg = error
                 console.log('error' + error)
             })
     }
@@ -157,7 +212,9 @@ export default {
         display: inline-block;
         vertical-align: middle;
     }
-
+    .mint-button{
+        margin-top: 0.5em;
+    }
     html {
         -ms-text-size-adjust: 100%;
         -webkit-text-size-adjust: 100%;
